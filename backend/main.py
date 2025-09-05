@@ -15,6 +15,9 @@ import requests
 
 app = FastAPI()
 
+# Global progress storage
+progress_store = {}
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -33,20 +36,29 @@ def read_root():
         frontend_path = Path("/app/frontend/index.html")
     return FileResponse(str(frontend_path))
 
+@app.get("/progress/{scan_id}")
+def get_progress(scan_id: str):
+    return progress_store.get(scan_id, {"progress": 0, "status": "Starting..."})
+
 @app.post("/run")
 def run_scan(target: str = Form(...)):
     scan_id = str(uuid.uuid4())
     workdir = os.path.join(tempfile.gettempdir(), scan_id)
     os.makedirs(workdir, exist_ok=True)
+    
+    # Initialize progress
+    progress_store[scan_id] = {"progress": 0, "status": "Initializing..."}
 
     try:
         # Step 1: Create target.txt
+        progress_store[scan_id] = {"progress": 10, "status": "Creating target file..."}
         target_file = os.path.join(workdir, "target.txt")
         with open(target_file, "w", encoding='utf-8') as f:
             f.write(target.strip())
         
         # Check OS
         os_info = platform.system()
+        progress_store[scan_id] = {"progress": 20, "status": "Fetching URLs from Wayback Machine..."}
         
         # Step 2: Get URLs (OS-specific)
         allurls_file = os.path.join(workdir, "allurls.txt")
@@ -68,6 +80,7 @@ def run_scan(target: str = Form(...)):
                 all_urls = []
             
             # Filter URLs manually
+            progress_store[scan_id] = {"progress": 50, "status": "Filtering URLs..."}
             filtered_urls = [url for url in all_urls if url and '.js' not in url and '=' in url]
             unique_urls = list(set(filtered_urls))  # Manual deduplication
             
@@ -89,6 +102,7 @@ def run_scan(target: str = Form(...)):
                 return {"status": "success", "output": f"No URLs found for {target}"}
             
             # Filter and deduplicate
+            progress_store[scan_id] = {"progress": 50, "status": "Filtering and deduplicating URLs..."}
             cmd2 = f"cat {allurls_file} | grep -v 'js' | grep '=' | uro > {xss_file}"
             result2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True)
             
@@ -107,6 +121,7 @@ def run_scan(target: str = Form(...)):
             return {"status": "success", "output": f"No URLs with parameters found for {target}"}
         
         # Step 4: Run XSS scanner
+        progress_store[scan_id] = {"progress": 70, "status": f"Scanning {len(unique_urls)} URLs for XSS vulnerabilities..."}
         output_file = os.path.join(workdir, "results.txt")
         
         # Capture all output from scanner
@@ -120,6 +135,7 @@ def run_scan(target: str = Form(...)):
             log_capture.write(f"Traceback: {traceback.format_exc()}\n")
         
         # Get captured logs and clean ANSI codes
+        progress_store[scan_id] = {"progress": 90, "status": "Processing results..."}
         scan_logs = log_capture.getvalue()
         # Remove ANSI color codes
         import re
@@ -141,7 +157,8 @@ def run_scan(target: str = Form(...)):
         else:
             result += "No vulnerabilities found."
         
-        return {"status": "success", "output": result}
+        progress_store[scan_id] = {"progress": 100, "status": "Scan completed!"}
+        return {"status": "success", "output": result, "scan_id": scan_id}
 
     except Exception as e:
         error_details = f"Error: {str(e)}\nTraceback: {traceback.format_exc()}"
