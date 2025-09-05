@@ -14,6 +14,7 @@ import io
 import contextlib
 import traceback
 from pathlib import Path
+import platform
 
 app = FastAPI()
 
@@ -46,55 +47,85 @@ def run_scan(target: str = Form(...)):
         with open(target_file, "w") as f:
             f.write(target.strip())
         
-        # Step 2: waybackurls
+        # Step 2: Get URLs (platform-specific)
         allurls_file = os.path.join(workdir, "allurls.txt")
-        with open(target_file, 'r') as f:
-            target_content = f.read().strip()
         
-        # Run waybackurls
-        result1 = subprocess.run(
-            ['/go/bin/waybackurls'], 
-            input=target_content, 
-            text=True, 
-            capture_output=True
-        )
+        if platform.system() == "Windows":
+            # Windows fallback - use Wayback Machine API
+            domain = target.replace('http://', '').replace('https://', '').split('/')[0]
+            api_url = f"http://web.archive.org/cdx/search/cdx?url={domain}/*&output=txt&fl=original&collapse=urlkey"
+            try:
+                response = requests.get(api_url, timeout=30)
+                if response.status_code == 200:
+                    urls = response.text.strip().split('\n')
+                    urls = [url for url in urls if url and url.startswith('http')]
+                else:
+                    urls = []
+            except:
+                urls = []
+        else:
+            # Linux - use waybackurls tool
+            with open(target_file, 'r') as f:
+                target_content = f.read().strip()
+            
+            waybackurls_cmd = 'waybackurls'
+            if os.path.exists('/go/bin/waybackurls'):
+                waybackurls_cmd = '/go/bin/waybackurls'
+            
+            result1 = subprocess.run(
+                [waybackurls_cmd], 
+                input=target_content, 
+                text=True, 
+                capture_output=True
+            )
+            
+            if result1.returncode != 0:
+                return {"status": "error", "message": f"waybackurls failed: {result1.stderr}"}
+            
+            urls = result1.stdout.strip().split('\n') if result1.stdout.strip() else []
         
-        if result1.returncode != 0:
-            return {"status": "error", "message": f"waybackurls failed: {result1.stderr}"}
-        
-        # Save waybackurls output
+        # Save all URLs
         with open(allurls_file, 'w') as f:
-            f.write(result1.stdout)
+            for url in urls:
+                if url.strip():
+                    f.write(url + '\n')
         
-        if not result1.stdout.strip():
-            return {"status": "success", "output": f"No URLs found by waybackurls for {target}"}
+        if not urls:
+            return {"status": "success", "output": f"No URLs found for {target}"}
         
-        # Step 3: Filter and deduplicate
-        urls = result1.stdout.strip().split('\n')
+        # Step 3: Filter URLs
         filtered_urls = [url for url in urls if url and '.js' not in url and '=' in url]
         
         if not filtered_urls:
             return {"status": "success", "output": f"No URLs with parameters found for {target}"}
         
-        # Run uro for deduplication
-        uro_input = '\n'.join(filtered_urls)
-        result2 = subprocess.run(
-            ['uro'], 
-            input=uro_input, 
-            text=True, 
-            capture_output=True
-        )
-        
+        # Step 4: Deduplicate URLs
         xss_file = os.path.join(workdir, "xss.txt")
-        if result2.returncode == 0:
-            with open(xss_file, 'w') as f:
-                f.write(result2.stdout)
-            unique_urls = result2.stdout.strip().split('\n')
+        
+        if platform.system() != "Windows":
+            # Try uro on Linux
+            uro_input = '\n'.join(filtered_urls)
+            try:
+                result2 = subprocess.run(
+                    ['uro'], 
+                    input=uro_input, 
+                    text=True, 
+                    capture_output=True
+                )
+                if result2.returncode == 0:
+                    unique_urls = result2.stdout.strip().split('\n')
+                else:
+                    unique_urls = list(set(filtered_urls))
+            except:
+                unique_urls = list(set(filtered_urls))
         else:
-            # Fallback: manual deduplication
+            # Manual deduplication on Windows
             unique_urls = list(set(filtered_urls))
-            with open(xss_file, 'w') as f:
-                for url in unique_urls:
+        
+        # Save filtered URLs
+        with open(xss_file, 'w') as f:
+            for url in unique_urls:
+                if url.strip():
                     f.write(url + '\n')
         
         unique_urls = [url for url in unique_urls if url.strip()]
