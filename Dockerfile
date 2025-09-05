@@ -21,7 +21,7 @@ ENV PATH=$PATH:/go/bin
 
 # Install Go tools
 RUN go install github.com/tomnomnom/waybackurls@latest
-RUN go install github.com/s0md3v/uro@latest
+#RUN go install github.com/s0md3v/uro@latest
 
 # Create app directory
 WORKDIR /app
@@ -29,6 +29,9 @@ WORKDIR /app
 # Copy requirements and install Python dependencies
 COPY backend/requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Install uro (Python package)
+RUN pip3 install uro
 
 # Copy application files
 COPY backend/ ./backend/
