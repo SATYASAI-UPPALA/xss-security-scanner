@@ -3,3 +3,4 @@ uvicorn
 aiohttp
 colorama
 requests
+python-multipart
