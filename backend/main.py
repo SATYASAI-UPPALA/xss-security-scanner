@@ -4,17 +4,12 @@ from fastapi.responses import FileResponse
 import uuid
 import os
 import tempfile
-import requests
 from func import MassScanner
-from urllib.parse import urljoin, urlparse
-import re
 import subprocess
-import sys
 import io
 import contextlib
 import traceback
 from pathlib import Path
-import platform
 
 app = FastAPI()
 
@@ -26,6 +21,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/")
 def read_root():
@@ -44,95 +40,40 @@ def run_scan(target: str = Form(...)):
     try:
         # Step 1: Create target.txt
         target_file = os.path.join(workdir, "target.txt")
-        with open(target_file, "w") as f:
+        with open(target_file, "w", encoding='utf-8') as f:
             f.write(target.strip())
         
-        # Step 2: Get URLs (platform-specific)
+        # Step 2: cat target.txt | waybackurls > allurls.txt
         allurls_file = os.path.join(workdir, "allurls.txt")
+        cmd1 = f"cat {target_file} | waybackurls > {allurls_file}"
+        result1 = subprocess.run(cmd1, shell=True, capture_output=True, text=True)
         
-        if platform.system() == "Windows":
-            # Windows fallback - use Wayback Machine API
-            domain = target.replace('http://', '').replace('https://', '').split('/')[0]
-            api_url = f"http://web.archive.org/cdx/search/cdx?url={domain}/*&output=txt&fl=original&collapse=urlkey"
-            try:
-                response = requests.get(api_url, timeout=30)
-                if response.status_code == 200:
-                    urls = response.text.strip().split('\n')
-                    urls = [url for url in urls if url and url.startswith('http')]
-                else:
-                    urls = []
-            except:
-                urls = []
-        else:
-            # Linux - use waybackurls tool
-            with open(target_file, 'r') as f:
-                target_content = f.read().strip()
-            
-            waybackurls_cmd = 'waybackurls'
-            if os.path.exists('/go/bin/waybackurls'):
-                waybackurls_cmd = '/go/bin/waybackurls'
-            
-            result1 = subprocess.run(
-                [waybackurls_cmd], 
-                input=target_content, 
-                text=True, 
-                capture_output=True
-            )
-            
-            if result1.returncode != 0:
-                return {"status": "error", "message": f"waybackurls failed: {result1.stderr}"}
-            
-            urls = result1.stdout.strip().split('\n') if result1.stdout.strip() else []
+        if result1.returncode != 0:
+            return {"status": "error", "message": f"waybackurls failed: {result1.stderr}"}
         
-        # Save all URLs
-        with open(allurls_file, 'w') as f:
-            for url in urls:
-                if url.strip():
-                    f.write(url + '\n')
-        
-        if not urls:
+        if not os.path.exists(allurls_file) or os.path.getsize(allurls_file) == 0:
             return {"status": "success", "output": f"No URLs found for {target}"}
         
-        # Step 3: Filter URLs
-        filtered_urls = [url for url in urls if url and '.js' not in url and '=' in url]
+        # Step 3: cat allurls.txt | grep -v 'js' | grep '=' | uro > xss.txt
+        xss_file = os.path.join(workdir, "xss.txt")
+        cmd2 = f"cat {allurls_file} | grep -v 'js' | grep '=' | uro > {xss_file}"
+        result2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True)
         
-        if not filtered_urls:
+        if result2.returncode != 0:
+            return {"status": "error", "message": f"Filtering failed: {result2.stderr}"}
+        
+        if not os.path.exists(xss_file) or os.path.getsize(xss_file) == 0:
             return {"status": "success", "output": f"No URLs with parameters found for {target}"}
         
-        # Step 4: Deduplicate URLs
-        xss_file = os.path.join(workdir, "xss.txt")
-        
-        if platform.system() != "Windows":
-            # Try uro on Linux
-            uro_input = '\n'.join(filtered_urls)
-            try:
-                result2 = subprocess.run(
-                    ['uro'], 
-                    input=uro_input, 
-                    text=True, 
-                    capture_output=True
-                )
-                if result2.returncode == 0:
-                    unique_urls = result2.stdout.strip().split('\n')
-                else:
-                    unique_urls = list(set(filtered_urls))
-            except:
-                unique_urls = list(set(filtered_urls))
-        else:
-            # Manual deduplication on Windows
-            unique_urls = list(set(filtered_urls))
-        
-        # Save filtered URLs
-        with open(xss_file, 'w') as f:
-            for url in unique_urls:
-                if url.strip():
-                    f.write(url + '\n')
+        # Count URLs
+        with open(xss_file, 'r', encoding='utf-8') as f:
+            unique_urls = [line.strip() for line in f if line.strip()]
         
         unique_urls = [url for url in unique_urls if url.strip()]
         if not unique_urls:
             return {"status": "success", "output": f"No URLs with parameters found for {target}"}
         
-        # Step 4: python3 MXS.py -i xss.txt -p xss_payloads.txt -c 1500 -t 15
+        # Step 4: Run XSS scanner
         output_file = os.path.join(workdir, "results.txt")
         
         # Capture all output from scanner
@@ -155,7 +96,7 @@ def run_scan(target: str = Form(...)):
         # Read results
         vulnerable_urls = ""
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-            with open(output_file, "r") as f:
+            with open(output_file, "r", encoding='utf-8') as f:
                 vulnerable_urls = f.read()
         
         result = f"XSS Scan Results for {target}:\n\n"
