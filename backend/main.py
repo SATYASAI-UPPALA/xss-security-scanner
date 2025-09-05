@@ -11,6 +11,7 @@ import contextlib
 import traceback
 from pathlib import Path
 import platform
+import requests
 
 app = FastAPI()
 
@@ -44,38 +45,62 @@ def run_scan(target: str = Form(...)):
         with open(target_file, "w", encoding='utf-8') as f:
             f.write(target.strip())
         
-        # Check OS and show info
+        # Check OS
         os_info = platform.system()
         
-        # Step 2: waybackurls (Linux only)
+        # Step 2: Get URLs (OS-specific)
         allurls_file = os.path.join(workdir, "allurls.txt")
+        xss_file = os.path.join(workdir, "xss.txt")
         
         if os_info == "Windows":
-            return {"status": "error", "message": f"This scanner requires Linux. Current OS: {os_info}. Please deploy to Render for Linux environment."}
+            # Windows fallback - use Wayback Machine API
+            domain = target.replace('http://', '').replace('https://', '').split('/')[0]
+            api_url = f"http://web.archive.org/cdx/search/cdx?url={domain}/*&output=txt&fl=original&collapse=urlkey"
+            
+            try:
+                response = requests.get(api_url, timeout=30)
+                if response.status_code == 200:
+                    all_urls = response.text.strip().split('\n')
+                    all_urls = [url for url in all_urls if url and url.startswith('http')]
+                else:
+                    all_urls = []
+            except:
+                all_urls = []
+            
+            # Filter URLs manually
+            filtered_urls = [url for url in all_urls if url and '.js' not in url and '=' in url]
+            unique_urls = list(set(filtered_urls))  # Manual deduplication
+            
+            # Save to xss.txt
+            with open(xss_file, 'w', encoding='utf-8') as f:
+                for url in unique_urls:
+                    if url.strip():
+                        f.write(url + '\n')
         
-        cmd1 = f"cat {target_file} | waybackurls > {allurls_file}"
-        result1 = subprocess.run(cmd1, shell=True, capture_output=True, text=True)
-        
-        if result1.returncode != 0:
-            return {"status": "error", "message": f"waybackurls failed: {result1.stderr}"}
-        
-        if not os.path.exists(allurls_file) or os.path.getsize(allurls_file) == 0:
-            return {"status": "success", "output": f"No URLs found for {target}"}
-        
-        # Step 3: cat allurls.txt | grep -v 'js' | grep '=' | uro > xss.txt
-        xss_file = os.path.join(workdir, "xss.txt")
-        cmd2 = f"cat {allurls_file} | grep -v 'js' | grep '=' | uro > {xss_file}"
-        result2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True)
-        
-        if result2.returncode != 0:
-            return {"status": "error", "message": f"Filtering failed: {result2.stderr}"}
-        
-        if not os.path.exists(xss_file) or os.path.getsize(xss_file) == 0:
-            return {"status": "success", "output": f"No URLs with parameters found for {target}"}
-        
-        # Count URLs
-        with open(xss_file, 'r', encoding='utf-8') as f:
-            unique_urls = [line.strip() for line in f if line.strip()]
+        else:
+            # Linux - use shell commands
+            cmd1 = f"cat {target_file} | waybackurls > {allurls_file}"
+            result1 = subprocess.run(cmd1, shell=True, capture_output=True, text=True)
+            
+            if result1.returncode != 0:
+                return {"status": "error", "message": f"waybackurls failed: {result1.stderr}"}
+            
+            if not os.path.exists(allurls_file) or os.path.getsize(allurls_file) == 0:
+                return {"status": "success", "output": f"No URLs found for {target}"}
+            
+            # Filter and deduplicate
+            cmd2 = f"cat {allurls_file} | grep -v 'js' | grep '=' | uro > {xss_file}"
+            result2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True)
+            
+            if result2.returncode != 0:
+                return {"status": "error", "message": f"Filtering failed: {result2.stderr}"}
+            
+            if not os.path.exists(xss_file) or os.path.getsize(xss_file) == 0:
+                return {"status": "success", "output": f"No URLs with parameters found for {target}"}
+            
+            # Count URLs
+            with open(xss_file, 'r', encoding='utf-8') as f:
+                unique_urls = [line.strip() for line in f if line.strip()]
         
         unique_urls = [url for url in unique_urls if url.strip()]
         if not unique_urls:
