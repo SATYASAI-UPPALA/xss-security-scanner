@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XSS Security Scanner</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 15px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 2.5em;
+      margin-bottom: 10px;
+      font-weight: 300;
+    }
+    
+    .header p {
+      opacity: 0.9;
+      font-size: 1.1em;
+    }
+    
+    .main-content {
+      padding: 40px;
+    }
+    
+    .scan-section {
+      background: #f8f9fa;
+      padding: 30px;
+      border-radius: 10px;
+      margin-bottom: 30px;
+      border-left: 4px solid #667eea;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #2c3e50;
+    }
+    
+    .input-container {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
+    input[type="text"] {
+      flex: 1;
+      padding: 15px;
+      border: 2px solid #e1e8ed;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: all 0.3s ease;
+    }
+    
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    
+    .scan-btn {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      min-width: 120px;
+    }
+    
+    .scan-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+    
+    .scan-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .results-section {
+      background: white;
+      border-radius: 10px;
+      border: 1px solid #e1e8ed;
+    }
+    
+    .results-header {
+      background: #f8f9fa;
+      padding: 20px;
+      border-bottom: 1px solid #e1e8ed;
+      border-radius: 10px 10px 0 0;
+    }
+    
+    .results-header h3 {
+      color: #2c3e50;
+      font-size: 1.3em;
+    }
+    
+    .results-content {
+      padding: 20px;
+      min-height: 200px;
+    }
+    
+    .output {
+      background: #1a1a1a;
+      color: #00ff00;
+      padding: 20px;
+      border-radius: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 500px;
+      overflow-y: auto;
+      border: 1px solid #333;
+    }
+    
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 20px;
+    }
+    
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 10px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .status-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+    
+    .status-ready { background: #28a745; }
+    .status-scanning { background: #ffc107; }
+    .status-error { background: #dc3545; }
+    
+    .footer {
+      background: #2c3e50;
+      color: white;
+      text-align: center;
+      padding: 20px;
+      font-size: 0.9em;
+      opacity: 0.8;
+    }
+    
+    @media (max-width: 768px) {
+      .input-container {
+        flex-direction: column;
+      }
+      
+      input[type="text"] {
+        margin-bottom: 10px;
+      }
+      
+      .header h1 {
+        font-size: 2em;
+      }
+      
+      .main-content {
+        padding: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🛡️ XSS Security Scanner</h1>
+      <p>Professional Web Application Security Testing Tool</p>
+    </div>
+    
+    <div class="main-content">
+      <div class="scan-section">
+        <form id="scanForm">
+          <div class="form-group">
+            <label for="target">Target Domain</label>
+            <div class="input-container">
+              <input type="text" id="target" placeholder="Enter domain (e.g., example.com)" required>
+              <button type="submit" class="scan-btn" id="scanButton">
+                <span id="buttonText">🔍 Start Scan</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+      
+      <div class="results-section">
+        <div class="results-header">
+          <h3>
+            <span class="status-indicator status-ready" id="statusIndicator"></span>
+            Scan Results
+          </h3>
+        </div>
+        <div class="results-content">
+          <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Scanning in progress... Please wait</p>
+          </div>
+          <div class="output" id="output">Ready to scan. Enter a target domain and click "Start Scan" to begin security analysis.</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p>© 2024 XSS Security Scanner | Professional Security Testing Tool</p>
+    </div>
+  </div>
+
+  <script>
+    const scanForm = document.getElementById("scanForm");
+    const scanButton = document.getElementById("scanButton");
+    const buttonText = document.getElementById("buttonText");
+    const output = document.getElementById("output");
+    const loading = document.getElementById("loading");
+    const statusIndicator = document.getElementById("statusIndicator");
+    
+    function setStatus(status) {
+      statusIndicator.className = `status-indicator status-${status}`;
+    }
+    
+    function setLoading(isLoading) {
+      if (isLoading) {
+        scanButton.disabled = true;
+        buttonText.innerHTML = "⏳ Scanning...";
+        loading.style.display = "block";
+        output.style.display = "none";
+        setStatus("scanning");
+      } else {
+        scanButton.disabled = false;
+        buttonText.innerHTML = "🔍 Start Scan";
+        loading.style.display = "none";
+        output.style.display = "block";
+      }
+    }
+    
+    scanForm.onsubmit = async function(e) {
+      e.preventDefault();
+      
+      const target = document.getElementById("target").value.trim();
+      if (!target) return;
+      
+      setLoading(true);
+      
+      const formData = new FormData();
+      formData.append("target", target);
+      
+      try {
+        const response = await fetch("http://127.0.0.1:8000/run", {
+          method: "POST",
+          body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === "success") {
+          output.innerText = data.output;
+          setStatus("ready");
+        } else {
+          output.innerText = "❌ Error: " + (data.message || "Unknown error occurred");
+          setStatus("error");
+        }
+        
+      } catch (err) {
+        output.innerText = "❌ Connection Error: " + err.message;
+        setStatus("error");
+      } finally {
+        setLoading(false);
+      }
+    }
+  </script>
+</body>
+</html>
