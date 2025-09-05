@@ -163,6 +163,33 @@
       margin: 0 auto 10px;
     }
     
+    .progress-container {
+      width: 100%;
+      background: #f0f0f0;
+      border-radius: 10px;
+      margin: 15px 0;
+      overflow: hidden;
+    }
+    
+    .progress-bar {
+      height: 20px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      border-radius: 10px;
+      transition: width 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    
+    .progress-text {
+      margin-top: 10px;
+      color: #667eea;
+      font-weight: 500;
+    }
+    
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
@@ -240,7 +267,10 @@
         <div class="results-content">
           <div class="loading" id="loading">
             <div class="spinner"></div>
-            <p>Scanning in progress... Please wait</p>
+            <div class="progress-container">
+              <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
+            </div>
+            <p class="progress-text" id="progressText">Scanning in progress... Please wait</p>
           </div>
           <div class="output" id="output">Ready to scan. Enter a target domain and click "Start Scan" to begin security analysis.</div>
         </div>
@@ -259,23 +289,51 @@
     const output = document.getElementById("output");
     const loading = document.getElementById("loading");
     const statusIndicator = document.getElementById("statusIndicator");
+    const progressBar = document.getElementById("progressBar");
+    const progressText = document.getElementById("progressText");
+    
+    let progressInterval;
     
     function setStatus(status) {
       statusIndicator.className = `status-indicator status-${status}`;
     }
     
-    function setLoading(isLoading) {
+    function updateProgress(progress, status) {
+      progressBar.style.width = progress + "%";
+      progressBar.textContent = progress + "%";
+      progressText.textContent = status;
+    }
+    
+    function setLoading(isLoading, scanId = null) {
       if (isLoading) {
         scanButton.disabled = true;
         buttonText.innerHTML = "⏳ Scanning...";
         loading.style.display = "block";
         output.style.display = "none";
         setStatus("scanning");
+        updateProgress(0, "Starting scan...");
+        
+        if (scanId) {
+          progressInterval = setInterval(() => {
+            fetch(`/progress/${scanId}`)
+              .then(response => response.json())
+              .then(data => {
+                updateProgress(data.progress, data.status);
+                if (data.progress >= 100) {
+                  clearInterval(progressInterval);
+                }
+              })
+              .catch(() => clearInterval(progressInterval));
+          }, 500);
+        }
       } else {
         scanButton.disabled = false;
         buttonText.innerHTML = "🔍 Start Scan";
         loading.style.display = "none";
         output.style.display = "block";
+        if (progressInterval) {
+          clearInterval(progressInterval);
+        }
       }
     }
     
@@ -291,7 +349,7 @@
       formData.append("target", target);
       
       try {
-        const response = await fetch("http://127.0.0.1:8000/run", {
+        const response = await fetch("/run", {
           method: "POST",
           body: formData
         });
@@ -299,17 +357,28 @@
         const data = await response.json();
         
         if (data.status === "success") {
-          output.innerText = data.output;
-          setStatus("ready");
+          if (data.scan_id) {
+            setLoading(true, data.scan_id);
+            // Wait a bit for final progress update
+            setTimeout(() => {
+              output.innerText = data.output;
+              setStatus("ready");
+              setLoading(false);
+            }, 1000);
+          } else {
+            output.innerText = data.output;
+            setStatus("ready");
+            setLoading(false);
+          }
         } else {
           output.innerText = "❌ Error: " + (data.message || "Unknown error occurred");
           setStatus("error");
+          setLoading(false);
         }
         
       } catch (err) {
         output.innerText = "❌ Connection Error: " + err.message;
         setStatus("error");
-      } finally {
         setLoading(false);
       }
     }
