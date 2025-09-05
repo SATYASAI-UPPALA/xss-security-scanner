@@ -46,34 +46,58 @@ def run_scan(target: str = Form(...)):
         with open(target_file, "w") as f:
             f.write(target.strip())
         
-        # Step 2: cat target.txt | waybackurls > allurls.txt
+        # Step 2: waybackurls
         allurls_file = os.path.join(workdir, "allurls.txt")
-        cmd1 = f"cat {target_file} | waybackurls > {allurls_file}"
-        result1 = subprocess.run(cmd1, shell=True, capture_output=True, text=True)
+        with open(target_file, 'r') as f:
+            target_content = f.read().strip()
+        
+        # Run waybackurls
+        result1 = subprocess.run(
+            ['/go/bin/waybackurls'], 
+            input=target_content, 
+            text=True, 
+            capture_output=True
+        )
         
         if result1.returncode != 0:
             return {"status": "error", "message": f"waybackurls failed: {result1.stderr}"}
         
-        # Check if allurls.txt has content
-        if not os.path.exists(allurls_file) or os.path.getsize(allurls_file) == 0:
+        # Save waybackurls output
+        with open(allurls_file, 'w') as f:
+            f.write(result1.stdout)
+        
+        if not result1.stdout.strip():
             return {"status": "success", "output": f"No URLs found by waybackurls for {target}"}
         
-        # Step 3: cat allurls.txt | grep -v 'js' | grep '=' | uro > xss.txt
-        xss_file = os.path.join(workdir, "xss.txt")
-        cmd2 = f"cat {allurls_file} | grep -v 'js' | grep '=' | uro > {xss_file}"
-        result2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True)
+        # Step 3: Filter and deduplicate
+        urls = result1.stdout.strip().split('\n')
+        filtered_urls = [url for url in urls if url and '.js' not in url and '=' in url]
         
-        if result2.returncode != 0:
-            return {"status": "error", "message": f"Filtering/uro failed: {result2.stderr}"}
-        
-        # Check if xss.txt has content
-        if not os.path.exists(xss_file) or os.path.getsize(xss_file) == 0:
+        if not filtered_urls:
             return {"status": "success", "output": f"No URLs with parameters found for {target}"}
         
-        # Count URLs for reporting
-        with open(xss_file, 'r') as f:
-            unique_urls = [line.strip() for line in f if line.strip()]
+        # Run uro for deduplication
+        uro_input = '\n'.join(filtered_urls)
+        result2 = subprocess.run(
+            ['uro'], 
+            input=uro_input, 
+            text=True, 
+            capture_output=True
+        )
         
+        xss_file = os.path.join(workdir, "xss.txt")
+        if result2.returncode == 0:
+            with open(xss_file, 'w') as f:
+                f.write(result2.stdout)
+            unique_urls = result2.stdout.strip().split('\n')
+        else:
+            # Fallback: manual deduplication
+            unique_urls = list(set(filtered_urls))
+            with open(xss_file, 'w') as f:
+                for url in unique_urls:
+                    f.write(url + '\n')
+        
+        unique_urls = [url for url in unique_urls if url.strip()]
         if not unique_urls:
             return {"status": "success", "output": f"No URLs with parameters found for {target}"}
         
