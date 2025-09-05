@@ -10,6 +10,7 @@ import io
 import contextlib
 import traceback
 from pathlib import Path
+import platform
 
 app = FastAPI()
 
@@ -43,8 +44,15 @@ def run_scan(target: str = Form(...)):
         with open(target_file, "w", encoding='utf-8') as f:
             f.write(target.strip())
         
-        # Step 2: cat target.txt | waybackurls > allurls.txt
+        # Check OS and show info
+        os_info = platform.system()
+        
+        # Step 2: waybackurls (Linux only)
         allurls_file = os.path.join(workdir, "allurls.txt")
+        
+        if os_info == "Windows":
+            return {"status": "error", "message": f"This scanner requires Linux. Current OS: {os_info}. Please deploy to Render for Linux environment."}
+        
         cmd1 = f"cat {target_file} | waybackurls > {allurls_file}"
         result1 = subprocess.run(cmd1, shell=True, capture_output=True, text=True)
         
@@ -99,7 +107,7 @@ def run_scan(target: str = Form(...)):
             with open(output_file, "r", encoding='utf-8') as f:
                 vulnerable_urls = f.read()
         
-        result = f"XSS Scan Results for {target}:\n\n"
+        result = f"XSS Scan Results for {target} (OS: {os_info}):\n\n"
         result += f"Found {len(unique_urls)} URLs to test\n\n"
         if scan_logs.strip():
             result += f"Scanner Logs:\n{scan_logs}\n\n"
