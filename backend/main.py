@@ -12,11 +12,14 @@ import traceback
 from pathlib import Path
 import platform
 import requests
+import shutil
 
 app = FastAPI()
 
 # Global progress storage
 progress_store = {}
+# Global scan data storage
+scan_data_store = {}
 
 # Add CORS middleware
 app.add_middleware(
@@ -158,10 +161,47 @@ def run_scan(target: str = Form(...)):
             result += "No vulnerabilities found."
         
         progress_store[scan_id] = {"progress": 100, "status": "Scan completed!"}
+        # Store scan data for potential cleanup
+        scan_data_store[scan_id] = {
+            "workdir": workdir,
+            "target": target,
+            "completed": True
+        }
         return {"status": "success", "output": result, "scan_id": scan_id}
 
     except Exception as e:
         error_details = f"Error: {str(e)}\nTraceback: {traceback.format_exc()}"
         return {"status": "error", "message": error_details}
+
+@app.delete("/cleanup/{scan_id}")
+def cleanup_scan_files(scan_id: str):
+    """Delete all files created during a scan"""
+    try:
+        if scan_id in scan_data_store:
+            workdir = scan_data_store[scan_id]["workdir"]
+            if os.path.exists(workdir):
+                shutil.rmtree(workdir)
+            # Clean up from storage
+            del scan_data_store[scan_id]
+            if scan_id in progress_store:
+                del progress_store[scan_id]
+            return {"status": "success", "message": "Scan files deleted successfully"}
+        else:
+            return {"status": "error", "message": "Scan ID not found"}
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to delete files: {str(e)}"}
+
+@app.get("/scans")
+def list_scans():
+    """List all completed scans"""
+    completed_scans = []
+    for scan_id, data in scan_data_store.items():
+        if data.get("completed", False):
+            completed_scans.append({
+                "scan_id": scan_id,
+                "target": data["target"],
+                "workdir": data["workdir"]
+            })
+    return {"scans": completed_scans}
 
 
