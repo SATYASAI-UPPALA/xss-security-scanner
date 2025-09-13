@@ -109,6 +109,38 @@
       transform: none;
     }
     
+    .delete-btn {
+      background: linear-gradient(135deg, #dc3545, #c82333);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      margin-top: 15px;
+      display: none;
+    }
+    
+    .delete-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 10px rgba(220, 53, 69, 0.4);
+    }
+    
+    .delete-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .scan-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 15px;
+    }
+    
     .results-section {
       background: white;
       border-radius: 10px;
@@ -273,6 +305,11 @@
             <p class="progress-text" id="progressText">Scanning in progress... Please wait</p>
           </div>
           <div class="output" id="output">Ready to scan. Enter a target domain and click "Start Scan" to begin security analysis.</div>
+          <div class="scan-actions">
+            <button class="delete-btn" id="deleteBtn" onclick="deleteScanFiles()">
+              🗑️ Delete Saved Files
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -291,8 +328,10 @@
     const statusIndicator = document.getElementById("statusIndicator");
     const progressBar = document.getElementById("progressBar");
     const progressText = document.getElementById("progressText");
+    const deleteBtn = document.getElementById("deleteBtn");
     
     let progressInterval;
+    let currentScanId = null;
     
     function setStatus(status) {
       statusIndicator.className = `status-indicator status-${status}`;
@@ -344,42 +383,68 @@
       if (!target) return;
       
       setLoading(true);
-      
-      const formData = new FormData();
-      formData.append("target", target);
+      setStatus("scanning");
       
       try {
+        const formData = new FormData();
+        formData.append("target", target);
+        
         const response = await fetch("/run", {
           method: "POST",
           body: formData
         });
         
-        const data = await response.json();
+        const result = await response.json();
         
-        if (data.status === "success") {
-          if (data.scan_id) {
-            setLoading(true, data.scan_id);
-            // Wait a bit for final progress update
-            setTimeout(() => {
-              output.innerText = data.output;
-              setStatus("ready");
-              setLoading(false);
-            }, 1000);
-          } else {
-            output.innerText = data.output;
-            setStatus("ready");
-            setLoading(false);
-          }
+        if (result.status === "success") {
+          output.textContent = result.output;
+          setStatus("ready");
+          currentScanId = result.scan_id;
+          deleteBtn.style.display = "inline-block";
         } else {
-          output.innerText = "❌ Error: " + (data.message || "Unknown error occurred");
+          output.textContent = "Error: " + (result.message || "Unknown error occurred");
           setStatus("error");
-          setLoading(false);
         }
-        
-      } catch (err) {
-        output.innerText = "❌ Connection Error: " + err.message;
+      } catch (error) {
+        output.textContent = "Network error: " + error.message;
         setStatus("error");
+      } finally {
         setLoading(false);
+      }
+    };
+    
+    async function deleteScanFiles() {
+      if (!currentScanId) {
+        alert("No scan files to delete");
+        return;
+      }
+      
+      if (!confirm("Are you sure you want to delete the saved scan files? This action cannot be undone.")) {
+        return;
+      }
+      
+      deleteBtn.disabled = true;
+      deleteBtn.textContent = "🗑️ Deleting...";
+      
+      try {
+        const response = await fetch(`/cleanup/${currentScanId}`, {
+          method: "DELETE"
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === "success") {
+          alert("Scan files deleted successfully!");
+          deleteBtn.style.display = "none";
+          currentScanId = null;
+        } else {
+          alert("Error deleting files: " + result.message);
+        }
+      } catch (error) {
+        alert("Network error: " + error.message);
+      } finally {
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = "🗑️ Delete Saved Files";
       }
     }
   </script>
